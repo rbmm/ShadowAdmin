@@ -1458,6 +1458,7 @@ typedef struct _USER_EXTENDED_INFORMATION
     UNICODE_STRING PasswordHint;
     BOOLEAN DontShowInLogonUI;
     SAM_SHELL_OBJECT_PROPERTIES ShellAdminObjectProperties;
+	UCHAR _[0x68];
 } USER_EXTENDED_INFORMATION, *PUSER_EXTENDED_INFORMATION;
 
 // For local callers only.

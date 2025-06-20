@@ -60,13 +60,13 @@ STDAPI DllRegisterServer()
 	return E_FAIL;
 }
 
-NTSTATUS tr4();
+NTSTATUS ExecShadowAdmin();
 
 VOID NTAPI ExecAdmin(_In_opt_ PVOID , _In_opt_ PVOID , _In_opt_ PVOID )
 {
 	if (IsShadowAdminApiPresent())
 	{
-		tr4();
+		ExecShadowAdmin();
 	}
 }
 

