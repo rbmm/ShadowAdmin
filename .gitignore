@@ -1,0 +1,10 @@
+.vs
+*.pdb
+tmp
+*.obj
+*.lib
+*.exp
+*.aps
+*.map
+*.asm
+*.bin
