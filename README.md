@@ -68,6 +68,63 @@ BOOLEAN IsShadowAdminApiPresent()
 }
 ```
 
+we can enum all Shadow Admins (name, sid and Linked User Sid) with next code:
+
+```
+NTSTATUS EnumShadowAdmins()
+{
+	SAM_HANDLE ServerHandle, DomainHandle, AliasHandle;
+	OBJECT_ATTRIBUTES oa = { sizeof(oa) };
+	NTSTATUS status = SamConnect(0, &ServerHandle, SAM_SERVER_LOOKUP_DOMAIN, &oa);
+	if (0 <= status)
+	{
+		SID BUILTIN = { SID_REVISION, 1, SECURITY_NT_AUTHORITY, {SECURITY_BUILTIN_DOMAIN_RID } };
+
+		status = SamOpenDomain(ServerHandle, DOMAIN_EXECUTE|DOMAIN_READ, &BUILTIN, &DomainHandle);
+		SamCloseHandle(ServerHandle);
+		if (0 <= status)
+		{
+			status = SamOpenAlias(DomainHandle, ALIAS_LIST_MEMBERS, DOMAIN_ALIAS_RID_ADMINS, &AliasHandle);
+			SamCloseHandle(DomainHandle);
+			if (0 <= status)
+			{
+				ULONG MemberCount;
+				PSID *MemberIds, UserSid, Sid;
+				status = SamGetMembersInAlias(AliasHandle, &MemberIds, &MemberCount);
+				SamCloseHandle(AliasHandle);
+				if (0 <= status)
+				{
+					PVOID buf = MemberIds;
+					if (MemberCount)
+					{
+						do 
+						{
+							BOOLEAN bShadowAdmin;
+							PWSTR Name;
+							if (0 <= (status = SamiIsShadowAdminAccount(Sid = *MemberIds++, &bShadowAdmin, &Name, &UserSid)))
+							{
+								if (bShadowAdmin)
+								{
+									WCHAR sz1[SECURITY_MAX_SID_STRING_CHARACTERS], sz2[SECURITY_MAX_SID_STRING_CHARACTERS];
+									UNICODE_STRING us1 = { 0, sizeof(sz1), sz1 }, us2 = { 0, sizeof(sz2), sz2 };
+									RtlConvertSidToUnicodeString(&us1, Sid, FALSE);
+									RtlConvertSidToUnicodeString(&us2, UserSid, FALSE);
+									DbgPrint("%ws: %wZ -> %wZ\n", Name, &us1, &us2);
+									SamFreeMemory(UserSid);
+									SamFreeMemory(Name);
+								}
+							}
+						} while (--MemberCount);
+					}
+					SamFreeMemory(buf);
+				}
+			}
+		}
+	}
+	return status;
+}
+```
+
 ## How Do Users Get a Shadow Account Token?
 
 consent.exe call
