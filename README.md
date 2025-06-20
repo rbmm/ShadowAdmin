@@ -68,6 +68,8 @@ BOOLEAN IsShadowAdminApiPresent()
 }
 ```
 
+## Enum Shadow Admins
+
 we can enum all Shadow Admins (name, sid and Linked User Sid) with next code:
 
 ```
