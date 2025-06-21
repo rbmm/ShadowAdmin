@@ -179,15 +179,15 @@ so:
 1) checked are user is shadow admin by Sid and name (for Legacy Shadow Admin)
 2) if `LsapShadowAdminEnabled` (global variable) or `LsapCanLogonShadowAdmin` return false, `STATUS_ACCESS_DENIED` returned
 
-`LsapCanLogonShadowAdmin` by self first check caller (of LsaLogonUser) token integrity, it must be >= SECURITY_MANDATORY_SYSTEM_RID
-then checked `TokenUser` sid - it must be `S-1-5-18` (NT AUTHORITY\SYSTEM - WellKnownGroup)
-and finally LsapIsProcessOnShadowAdminAllowList called - it checked FullProcessImageName - compare it with `%windir%\System32\Consent.exe`
+`LsapCanLogonShadowAdmin` by self first check caller (of `LsaLogonUser`) token integrity, it must be >= `SECURITY_MANDATORY_SYSTEM_RID`
+then checked `TokenUser` sid - it must be `S-1-5-18` (`NT AUTHORITY\SYSTEM` - `WellKnownGroup`)
+and finally `LsapIsProcessOnShadowAdminAllowList` called - it checked FullProcessImageName - compare it with `%windir%\System32\Consent.exe`
 and `%windir%\System32\Lsass.exe`( in our concrete case, this is lsass.exe )
 
 really this is very weak check, because no problem exec by self new consent.exe or lsass.exe and inject to it self code, which call `LogonUserExExW` or `LsaLogonUser`
 
 
-as demo, SAU project - start consent.exe, inject to it own dll and call LsaLogonUser, if found Shadow admin account. it token get - then start cmd and in it whoami
+as demo, SAU project - start consent.exe, inject to it own dll and call `LsaLogonUser`, if found Shadow admin account. it token get - then start cmd and in it whoami
 
 of course we need from begin have elevated admin or local system token. so this is not privilege escalation - we already have all at begin. this is only show that no sense check caller process name
 
