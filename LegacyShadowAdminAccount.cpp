@@ -227,7 +227,6 @@ ULONG CuipCreateAutomaticAdminAccount(_In_ HANDLE hToken, _Outptr_ PHANDLE Token
 					NetApiBufferFree(pui);
 					UCHAR Sid[SECURITY_MAX_SID_SIZE] = {};
 
-					LOCALGROUP_MEMBERS_INFO_0 mi = { Sid };
 					if (NOERROR == (dwError = AccountNameToSid(AccountName, Sid, sizeof(Sid))))
 					{
 						status = CuipHideShadowAdminFromLogonUi(Sid);
