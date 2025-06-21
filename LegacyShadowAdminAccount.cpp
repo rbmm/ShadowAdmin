@@ -244,7 +244,8 @@ ULONG CuipCreateAutomaticAdminAccount(_In_ HANDLE hToken, _Outptr_ PHANDLE Token
 						//	  break;
 						// }
 
-						switch (status = SamLocalGroupAddMembers(DOMAIN_ALIAS_RID_ADMINS, (PSID*)&Sid, 1))
+						PSID sid = Sid;
+						switch (status = SamLocalGroupAddMembers(DOMAIN_ALIAS_RID_ADMINS, &sid, 1))
 						{
 						case STATUS_SUCCESS:
 						case STATUS_MEMBER_IN_ALIAS:
