@@ -92,60 +92,8 @@ ULONG CuipGetShadowAdminAccountSuffix(_In_ PCWSTR lpAccountName, _Out_writes_(10
 	return NOERROR;
 }
 
-NTSTATUS CuipHideShadowAdminFromLogonUi(PSID UserSid)
-{
-	SAM_HANDLE UserHandle, ServerHandle, DomainHandle;
-	OBJECT_ATTRIBUTES oa = { sizeof(oa) };
-	NTSTATUS status = SamConnect(0, &ServerHandle, SAM_SERVER_LOOKUP_DOMAIN, &oa);
-	if (0 <= status)
-	{
-		PUCHAR pn = RtlSubAuthorityCountSid(UserSid);
-		--*pn;
-		status = SamOpenDomain(ServerHandle, DOMAIN_EXECUTE|DOMAIN_READ, UserSid, &DomainHandle);
-		++*pn;
-		SamCloseHandle(ServerHandle);
-		if (0 <= status)
-		{
-			status = SamOpenUser(DomainHandle, USER_ALL_ACCESS, *RtlSubAuthoritySid(UserSid, *pn - 1), &UserHandle);
-			SamCloseHandle(DomainHandle);
-			if (0 <= status)
-			{
-				USER_EXTENDED_INFORMATION uei = { };
-				//C_ASSERT(sizeof(USER_EXTENDED_INFORMATION) == 0xa8);
-				uei.ExtendedWhichFields = USER_EXTENDED_FIELD_DONT_SHOW_IN_LOGON_UI;
-				uei.DontShowInLogonUI = TRUE;
-				status = SamSetInformationUser(UserHandle, UserExtendedInformation, &uei);
-				SamCloseHandle(UserHandle);
-			}
-		}
-	}
-	return status;
-}
-
 // ?!?
 #define UF_SHADOW_ADMIN_ACCOUNT         0x4000
-
-ULONG AddUser(_In_ PCWSTR username)
-{
-	USER_INFO_4 ui = { };
-	ui.usri4_name = const_cast<PWSTR>(username);
-	ui.usri4_priv = USER_PRIV_ADMIN;
-	ui.usri4_flags = UF_DONT_EXPIRE_PASSWD|UF_SHADOW_ADMIN_ACCOUNT|UF_PASSWD_CANT_CHANGE|UF_PASSWD_NOTREQD|UF_SCRIPT;
-	ui.usri4_full_name = const_cast<PWSTR>(L"");
-	ui.usri4_logon_server = const_cast<PWSTR>(L"\\\\*");
-	ui.usri4_primary_group_id = DOMAIN_GROUP_RID_USERS;
-	ui.usri4_acct_expires = TIMEQ_FOREVER;
-	ui.usri4_max_storage = USER_MAXSTORAGE_UNLIMITED;
-
-	//SamConnect
-	//SamOpenDomain()
-	//SamCreateUser2InDomain(USER_NORMAL_ACCOUNT)
-	//SamQueryInformationUser
-	//SamSetInformationUser
-
-	// always fail due UF_SHADOW_ADMIN_ACCOUNT flag !!
-	return NetUserAdd(0, 4, (BYTE*)&ui, 0);
-}
 
 NTSTATUS CreateShadowAdminLink(_In_ HANDLE hAdminToken, _In_ HANDLE hUserHandle)
 {
@@ -162,85 +110,51 @@ NTSTATUS CreateShadowAdminLink(_In_ HANDLE hAdminToken, _In_ HANDLE hUserHandle)
 	return status;
 }
 
+BOOLEAN __WilFeatureTraits_Feature_AdminlessElevatedToken;
+
 ULONG CuipCreateAutomaticAdminAccount(_In_ HANDLE hToken, _Outptr_ PHANDLE TokenHandle)
 {
-	if (ImpersonateLoggedOnUser(hToken))
-	{
-		WCHAR AccountName[0x100+10], *username;
-		ULONG cch = _countof(AccountName);
-		BOOL fOk = GetUserNameExW(NameSamCompatible, AccountName, &cch);
-		RevertToSelf();
-		if (fOk)
-		{
-			union {
-				ULONG dwError;
-				NTSTATUS status;
-			};
+	CuipRemoveLegacyShadowAdminAccount(hToken);
 
-			if (NOERROR == (dwError = CuipGetShadowAdminAccountSuffix(AccountName, AccountName + cch)))
+	if (__WilFeatureTraits_Feature_AdminlessElevatedToken)
+	{
+		return ZwDuplicateObject(NtCurrentProcess(), hToken, NtCurrentProcess(), TokenHandle, 0, 0, DUPLICATE_SAME_ACCESS);
+	}
+
+	ULONG cb;
+	SE_TOKEN_USER stu;
+	NTSTATUS status = NtQueryInformationToken(hToken, TokenUser, &stu, sizeof(stu), &cb);
+
+	if (0 <= status)
+	{
+		PWSTR UserName;
+		PSID ShadowSid;
+		if (0 <= (status = SamiFindOrCreateShadowAdminAccount(stu.TokenUser.User.Sid, &UserName, &ShadowSid)))
+		{
+			//[S-1-2-0] '\LOCAL' [WellKnownGroup] really exist yet here
+			TOKEN_GROUPS LocalGroups = { 1, { &stu.Sid } };
+			if (0 <= (status = CuipGetClientLUID(hToken, LocalGroups.Groups)))
 			{
-				if (username = wcsrchr(AccountName, '\\'))
+				if (LogonUserExExW(UserName, L".", L"", 
+					LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT,
+					&LocalGroups, TokenHandle, 0, 0, 0, 0))
 				{
-					username++;
+					// always fail !!
+					if (0 > (status = CreateShadowAdminLink(*TokenHandle, hToken)))
+					{
+						NtClose(*TokenHandle);
+					}
 				}
 				else
 				{
-					username = AccountName;
-				}
-
-				PUSER_INFO_4 pui = 0;
-				switch (dwError = NetUserGetInfo(0, username, 4, (BYTE**)&pui))
-				{
-				case NERR_UserNotFound:
-					if (NOERROR == (dwError = AddUser(username))) {
-				case NOERROR:
-					NetApiBufferFree(pui);
-					UCHAR Sid[SECURITY_MAX_SID_SIZE] = {};
-
-					LOCALGROUP_MEMBERS_INFO_0 mi = { Sid };
-					if (NOERROR == (dwError = AccountNameToSid(AccountName, Sid, sizeof(Sid))))
-					{
-						status = CuipHideShadowAdminFromLogonUi(Sid);
-						// SamConnect 
-						// SamOpenDomain
-						// SamLookupNamesInDomain
-						// SamOpenAlias
-						// SamAddMemberToAlias
-						switch (dwError = NetLocalGroupAddMembers(0, L"Administrators", 0, (PBYTE)&mi, 1))
-						{
-						case NOERROR:
-						case ERROR_MEMBER_IN_ALIAS:
-							//[S-1-2-0] '\LOCAL' [WellKnownGroup] really exist yet here
-							TOKEN_GROUPS LocalGroups = { 1, { Sid } };
-							if (0 <= (status = CuipGetClientLUID(hToken, LocalGroups.Groups)))
-							{
-								if (LogonUserExExW(username, L".", L"", 
-									LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT,
-									&LocalGroups, TokenHandle, 0, 0, 0, 0))
-								{
-									// always fail !!
-									if (0 > (status = CreateShadowAdminLink(*TokenHandle, hToken)))
-									{
-										NtClose(*TokenHandle);
-									}
-								}
-								else
-								{
-									dwError = GetLastError();
-								}
-							}
-							break;
-						}
-					}}
-					break;
+					status = GetLastError();
 				}
 			}
-
-			return dwError;
+			SamFreeMemory(ShadowSid);
+			SamFreeMemory(UserName);
 		}
 	}
-
-	return GetLastError();
+	return status;
 }
 
 NTSTATUS CuipGetElevatedToken(_In_ HANDLE hToken, _Outptr_ PHANDLE TokenHandle)
@@ -361,3 +275,4 @@ __exit:
 
 	return dwError;
 }
+
