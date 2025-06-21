@@ -244,8 +244,10 @@ if `Feature_ShadowAdmin__private_IsEnabledDeviceUsageNoInline` flag `UF_SHADOW_A
 
 but let we fix (under debugger) `UF_SHADOW_ADMIN_ACCOUNT` flag. account will be created. but this is not all.
 
-`CuipHideShadowAdminFromLogonUi` set `UserDontShowInLogonUI` property on account and `NetLocalGroupAddMembers` add it to `"Administrators"`
-the `"Administrators"` is **hardcoded** ! so this api call fail on not EN windows, where `S-1-5-32-544` alias have another name. yet one error.
+`CuipHideShadowAdminFromLogonUi` set `UserDontShowInLogonUI` property on account and 
+`NetLocalGroupAddMembers` add it to `"Administrators"`
+the `"Administrators"` is **hardcoded** ! so this api call fail on not EN windows, where `S-1-5-32-544` alias have another name. 
+yet one error. (i write correct implementation - [`SamLocalGroupAddMembers`]())
 `LogonUserExExW` then is called (it ok). but then..
 `CreateShadowAdminLink` is called. it use strange `(TOKEN_INFORMATION_CLASS)-2` value. and got error `STATUS_NOT_IMPLEMENTED`
 interesting that kernel implementation of `NtSetInformationToken` first check `TOKEN_INFORMATION_CLASS` as unsigned and reject `-2` as too big.

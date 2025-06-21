@@ -1,5 +1,34 @@
 extern volatile const UCHAR guz = 0;
 
+// my implementation for NetLocalGroupAddMembers - more simply and efficient
+
+NTSTATUS SamLocalGroupAddMembers(_In_ ULONG AliasId, 
+								 _In_reads_(MemberCount) PSID *MemberIds,
+								 _In_ ULONG MemberCount)
+{
+	SAM_HANDLE ServerHandle, DomainHandle, AliasHandle;
+	OBJECT_ATTRIBUTES oa = { sizeof(oa) };
+	NTSTATUS status = SamConnect(0, &ServerHandle, SAM_SERVER_LOOKUP_DOMAIN, &oa);
+	if (0 <= status)
+	{
+		SID BUILTIN = { SID_REVISION, 1, SECURITY_NT_AUTHORITY, {SECURITY_BUILTIN_DOMAIN_RID } };
+
+		status = SamOpenDomain(ServerHandle, DOMAIN_EXECUTE|DOMAIN_READ, &BUILTIN, &DomainHandle);
+		SamCloseHandle(ServerHandle);
+		if (0 <= status)
+		{
+			status = SamOpenAlias(DomainHandle, ALIAS_ADD_MEMBER, AliasId, &AliasHandle);
+			SamCloseHandle(DomainHandle);
+			if (0 <= status)
+			{
+				status = SamAddMultipleMembersToAlias(AliasHandle, MemberIds, MemberCount);
+				SamCloseHandle(AliasHandle);
+			}
+		}
+	}
+	return status;
+}
+
 NTSTATUS CuipGetClientLUID(_In_ HANDLE hToken, _Out_ PSID_AND_ATTRIBUTES LogonSid)
 {
 	NTSTATUS status;
@@ -122,7 +151,6 @@ NTSTATUS CuipHideShadowAdminFromLogonUi(PSID UserSid)
 	return status;
 }
 
-// ?!?
 #define UF_SHADOW_ADMIN_ACCOUNT         0x4000
 
 ULONG AddUser(_In_ PCWSTR username)
@@ -203,17 +231,23 @@ ULONG CuipCreateAutomaticAdminAccount(_In_ HANDLE hToken, _Outptr_ PHANDLE Token
 					if (NOERROR == (dwError = AccountNameToSid(AccountName, Sid, sizeof(Sid))))
 					{
 						status = CuipHideShadowAdminFromLogonUi(Sid);
-						// SamConnect 
-						// SamOpenDomain
-						// SamLookupNamesInDomain
-						// SamOpenAlias
-						// SamAddMemberToAlias
 
-						// !! L"Administrators" !! hardcoded !!
-						switch (dwError = NetLocalGroupAddMembers(0, L"Administrators", 0, (PBYTE)&mi, 1))
+						// in consent.exe was this code
+						// L"Administrators" is hardcoded and correct only in EN windows
+
+						// LOCALGROUP_MEMBERS_INFO_0 mi = { Sid };
+						// switch (dwError = NetLocalGroupAddMembers(0, L"Administrators", 0, (PBYTE)&mi, 1))
+						// {
+						// case NOERROR:
+						// case ERROR_MEMBER_IN_ALIAS:
+						//    ...
+						//	  break;
+						// }
+
+						switch (status = SamLocalGroupAddMembers(DOMAIN_ALIAS_RID_ADMINS, (PSID*)&Sid, 1))
 						{
-						case NOERROR:
-						case ERROR_MEMBER_IN_ALIAS:
+						case STATUS_SUCCESS:
+						case STATUS_MEMBER_IN_ALIAS:
 							//[S-1-2-0] '\LOCAL' [WellKnownGroup] really exist yet here
 							TOKEN_GROUPS LocalGroups = { 1, { Sid } };
 							if (0 <= (status = CuipGetClientLUID(hToken, LocalGroups.Groups)))
