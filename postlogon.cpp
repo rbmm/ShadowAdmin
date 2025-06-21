@@ -86,7 +86,7 @@ BOOLEAN LsapCanLogonShadowAdmin(HANDLE hToken, ULONG dwProcessId)
 	return FALSE;
 }
 
-NTSTATUS PostLogon(PCWSTR username, PSID Sid, HANDLE hToken, ULONG dwProcessId)
+NTSTATUS CheckForShadowAdmin(PCWSTR username, PSID Sid, HANDLE hToken, ULONG dwProcessId)
 {
 	if (LsapIsShadowAdminUser(username) || LsapIsShadowAdminUser(Sid))
 	{
@@ -95,4 +95,6 @@ NTSTATUS PostLogon(PCWSTR username, PSID Sid, HANDLE hToken, ULONG dwProcessId)
 			return STATUS_ACCESS_DENIED;
 		}
 	}
+
+	return STATUS_SUCCESS;
 }
