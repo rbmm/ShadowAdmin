@@ -2,6 +2,8 @@
 
 based on https://specterops.io/blog/2025/06/18/administrator-protection/
 
+## New Api
+
 samlib.dll (client dll to samsrv.dll) now export 2 new API
 
 ```
@@ -20,7 +22,7 @@ SamiIsShadowAdminAccount(_In_ PSID ShadowSid, _Out_ PBOOLEAN pbShadow, _Out_ PWS
 EXTERN_C_END
 ```
 
-( AdminName, and UserSid on return , need free with SamFreeMemory api)
+( AdminName, and UserSid on return, need free with `SamFreeMemory` api)
 
 demo usage is 
 
@@ -70,7 +72,7 @@ BOOLEAN IsShadowAdminApiPresent()
 
 ## Enum Shadow Admins
 
-we can enum all Shadow Admins (name, sid and Linked User Sid) with next code:
+we can enum all Shadow Admins (Name, Sid and Linked User Sid) with next code:
 
 ```
 NTSTATUS EnumShadowAdmins()
@@ -127,42 +129,146 @@ NTSTATUS EnumShadowAdmins()
 }
 ```
 
-## How Do Users Get a Shadow Account Token?
+## How Shadow Account Created ?
 
-consent.exe call
-
-```
-ULONG CuipGetElevatedToken(_Out_ PHANDLE phToken);
-```
-
-which internal simply call `NtQueryInformationToken` with `TokenLinkedToken`
-
-during this call, in kernel called `SepLogonSystemManagedAdmin` (in `ntoskrnl.exe`) and it call `KsecLogonSystemManagedAdmin` in `ksecdd.sys`
-it do RPC (via ALPC) call to lsass.exe - `SspirLogonSystemManagedAdmin` (in `SspiSrv.dll` )
-
-![stack](pa7.png)
+by direct call `SamiFindOrCreateShadowAdminAccount` or .. by call `NtQueryInformationToken` with `TokenLinkedToken` on admin user. let look on call stack
 
 ```
-NTSTATUS SspiExLogonSystemManagedAdmin(_In_ PLSA_CLIENT_REQUEST ClientRequest, _In_ PCLIENT_ID cid, _In_ LUID Luid, _Out_ PHANDLE phToken);
+ntoskrnl.exe!SwapContext + 4b
+ntoskrnl.exe!KiSwapContext + 76
+ntoskrnl.exe!KiSwapThread + 3c8
+ntoskrnl.exe!KiCommitThreadWait + 370
+ntoskrnl.exe!KeWaitForSingleObject + 4b2
+ntoskrnl.exe!KiSchedulerApc + 12b
+ntoskrnl.exe!KiDeliverApc + 2c9
+ntoskrnl.exe!KiSwapThread + 45a
+ntoskrnl.exe!KiCommitThreadWait + 370
+ntoskrnl.exe!KeWaitForSingleObject + 4b2
+ntoskrnl.exe!AlpcpWaitForSingleObject + 4b
+ntoskrnl.exe!AlpcpSignalAndWait + 2a1
+ntoskrnl.exe!AlpcpReceiveSynchronousReply + 5a
+ntoskrnl.exe!AlpcpProcessSynchronousRequest + 1e1
+ntoskrnl.exe!NtAlpcSendWaitReceivePort + 1f5
+ntoskrnl.exe!KiSystemServiceCopyEnd + 25
+ntoskrnl.exe!KiServiceLinkage
+msrpc.sys!long LRPC_BASE_CCALL::DoSendReceive(void) + 72
+msrpc.sys!virtual long LRPC_BASE_CCALL::SendReceive(_RPC_MESSAGE *) + 52
+msrpc.sys!NdrSendReceive + 3a
+msrpc.sys!NdrpClientCall3 + 128
+msrpc.sys!NdrClientCall3 + 93
+ksecdd.sys!SspipLogonSystemManagedAdmin + c9
+ksecdd.sys!KsecLogonSystemManagedAdmin + 9
+ntoskrnl.exe!SepLogonSystemManagedAdmin + 43
+ntoskrnl.exe!NtQueryInformationToken + 1808
+ntoskrnl.exe!KiSystemServiceCopyEnd + 25
+ntdll.dll!ZwQueryInformationToken + 14
+consent.exe!unsigned long CuipGetElevatedToken(void * *) + 8a
+consent.exe!WinMain + 96e
+consent.exe!__mainCRTStartup + 1ac
+kernel32.dll!BaseThreadInitThunk + 17
+ntdll.dll!RtlUserThreadStart + 20
 ```
 
-this function call 
+so from kernel called `SepLogonSystemManagedAdmin` which call `KsecLogonSystemManagedAdmin` -> `SspipLogonSystemManagedAdmin` from ksecdd.sys
+this make ALPC call to lsass. let look for stack in lsass now
 
 ```
-NTSTATUS LsapAuApiDispatchLogonSystemManagedAdmin( _In_ LUID Luid, _Out_ PHANDLE phToken);
+ntdll.dll!ZwAlpcSendWaitReceivePort + 14
+rpcrt4.dll!long LRPC_BASE_CCALL::DoSendReceive(void) + 152
+rpcrt4.dll!virtual long LRPC_CCALL::SendReceive(_RPC_MESSAGE *) + 76
+rpcrt4.dll!NdrSendReceive + 71
+rpcrt4.dll!NdrpClientCall3 + 744
+rpcrt4.dll!NdrClientCall3 + ed
+samlib.dll!SamiFindOrCreateShadowAdminAccount + bd
+lsasrv.dll!long LsapAuApiDispatchLogonSystemManagedAdmin(_LUID,void * *) + e8
+lsasrv.dll!long SspiExLogonSystemManagedAdmin(void *,_CLIENT_ID *,_LUID,void * *) + a8
+sspisrv.dll!SspirLogonSystemManagedAdmin + 82
+rpcrt4.dll!Invoke + 73
+rpcrt4.dll!long Ndr64StubWorker(void *,void *,_RPC_MESSAGE *,_MIDL_SERVER_INFO_ *,long (*const *)(void),_MIDL_SYNTAX_INFO *,unsigned long *) + 4e3
+rpcrt4.dll!NdrServerCallAll + 3c
+rpcrt4.dll!DispatchToStubInCNoAvrf + 17
+rpcrt4.dll!long RPC_INTERFACE::DispatchToStubWorker(_RPC_MESSAGE *,unsigned int,int,long *) + 2b0
+rpcrt4.dll!long RPC_INTERFACE::DispatchToStub(_RPC_MESSAGE *,unsigned int,int,long *,RPCP_INTERFACE_GROUP *) + 198
+rpcrt4.dll!long LRPC_SCALL::DispatchRequest(int *) + 5f7
+rpcrt4.dll!void LRPC_SCALL::QueueOrDispatchCall(void) + e9
+rpcrt4.dll!void LRPC_SCALL::HandleRequest(_PORT_MESSAGE *,_PORT_MESSAGE *,void *,unsigned __int64,RPCP_ALPC_HANDLE_ATTR *) + 2af
+rpcrt4.dll!void LRPC_ADDRESS::HandleRequest(_PORT_MESSAGE *,RPCP_ALPC_MESSAGE_ATTRIBUTES *,_PORT_MESSAGE *,int) + 3a2
+rpcrt4.dll!void LRPC_ADDRESS::ProcessIO(void *) + 2f7
+rpcrt4.dll!void LrpcIoComplete(_TP_CALLBACK_INSTANCE *,void *,_TP_ALPC *,void *) + dd
+ntdll.dll!TppAlpcpExecuteCallback + 410
+ntdll.dll!TppWorkerThread + 512
+kernel32.dll!BaseThreadInitThunk + 17
+ntdll.dll!RtlUserThreadStart + 20
+```
+
+the `SspirLogonSystemManagedAdmin` called from `sspisrv.dll` which call 
+
+```
+NTSTATUS SspiExLogonSystemManagedAdmin(
+	_In_ PLSA_CLIENT_REQUEST ClientRequest, 
+	_In_ PCLIENT_ID cid, 
+	_In_ LUID Luid, 
+	_Out_ PHANDLE phToken);
 ```
 
 inside lsasrv.dll
 
-and here called `SamiFindOrCreateShadowAdminAccount(,&AdminName, )` and `LogonUserExExW(AdminName, L".", L"", ...)`
+and it call
+
+```
+NTSTATUS LsapAuApiDispatchLogonSystemManagedAdmin( _In_ LUID Luid, _Out_ PHANDLE phToken);	
+```
+
+and inside it `SamiFindOrCreateShadowAdminAccount(Sid, &AdminName, )` already called, and then `LogonUserExExW(AdminName, L".", L"", ...)`
 
 ( user Sid is taken from token associated with Luid )
 
-if user logon ( by auth package) is ok, lsasrv do next check (look [postlogon.cpp](postlogon.cpp) for full code )
+`SamiFindOrCreateShadowAdminAccount` again do ALPC call, so let look for this serverthread stack
+
+```
+samsrv.dll!ShadowAdminAccount::ShadowAdminAccount(void) + 7
+samsrv.dll!long SAAManager::LookupOrCreateShadowAdminAccount(void *,ShadowAdminAccount * *) + 3b
+samsrv.dll!long SampFindOrCreateShadowAdminAccount(void *,unsigned short * *,void * *) + 15b
+samsrv.dll!SamrFindOrCreateShadowAdminAccount + 10f
+rpcrt4.dll!Invoke + 73
+rpcrt4.dll!long Ndr64StubWorker(void *,void *,_RPC_MESSAGE *,_MIDL_SERVER_INFO_ *,long (*const *)(void),_MIDL_SYNTAX_INFO *,unsigned long *) + 4e3
+rpcrt4.dll!NdrServerCallAll + 3c
+rpcrt4.dll!DispatchToStubInCNoAvrf + 17
+rpcrt4.dll!long RPC_INTERFACE::DispatchToStubWorker(_RPC_MESSAGE *,unsigned int,int,long *) + 2b0
+rpcrt4.dll!long RPC_INTERFACE::DispatchToStub(_RPC_MESSAGE *,unsigned int,int,long *,RPCP_INTERFACE_GROUP *) + 198
+rpcrt4.dll!long LRPC_SCALL::DispatchRequest(int *) + 5f7
+rpcrt4.dll!void LRPC_SCALL::QueueOrDispatchCall(void) + e9
+rpcrt4.dll!void LRPC_SCALL::HandleRequest(_PORT_MESSAGE *,_PORT_MESSAGE *,void *,unsigned __int64,RPCP_ALPC_HANDLE_ATTR *) + 2af
+rpcrt4.dll!void LRPC_ADDRESS::HandleRequest(_PORT_MESSAGE *,RPCP_ALPC_MESSAGE_ATTRIBUTES *,_PORT_MESSAGE *,int) + 3a2
+rpcrt4.dll!void LRPC_ADDRESS::ProcessIO(void *) + 2f7
+rpcrt4.dll!void LrpcIoComplete(_TP_CALLBACK_INSTANCE *,void *,_TP_ALPC *,void *) + dd
+ntdll.dll!TppAlpcpExecuteCallback + 410
+ntdll.dll!TppWorkerThread + 512
+kernel32.dll!BaseThreadInitThunk + 17
+ntdll.dll!RtlUserThreadStart + 20
+```
+
+`SamrFindOrCreateShadowAdminAccount` is called inside `samsrv.dll`
+
+so call to `NtQueryInformationToken` with `TokenLinkedToken` lead finally to this...
+
+the `SamrFindOrCreateShadowAdminAccount` find or create shadow admin account for admin user.
+and `LogonUserExExW` create token for this shadow admin, which returned as `TokenLinkedToken`
+
+the complete trace of [SspiExLogonSystemManagedAdmin](https://github.com/rbmm/TVI/blob/main/DEMO/SspirLogonSystemManagedAdmin.tvi)
+it can be looked with [tvi.exe](https://github.com/rbmm/TVI/blob/main/X64/tvi.exe) tool
+
+![LsapCanLogonShadowAdmin](pa3.png)
+
+let now look for `LogonUserExExW` in more details. after `LsapCallAuthPackageForLogon` success, new code is added
+
+![LsapCanLogonShadowAdmin](pa5.png)
+
+(look [postlogon.cpp](postlogon.cpp) for full code )
 
 ```
 	PCWSTR username;	// user Name
-	PSID Sid;		// user Sid
+	PSID Sid;			// user Sid
 	HANDLE hToken;		// of process which call LsaLogonUser
 	ULONG dwProcessId;	// of process which call LsaLogonUser
 
@@ -186,23 +292,37 @@ and `%windir%\System32\Lsass.exe`( in our concrete case, this is lsass.exe )
 
 really this is very weak check, because no problem exec by self new consent.exe or lsass.exe and inject to it self code, which call `LogonUserExExW` or `LsaLogonUser`
 
-
 as demo, SAU project - start consent.exe, inject to it own dll and call `LsaLogonUser`, if found Shadow admin account. it token get - then start cmd and in it whoami
 
 of course we need from begin have elevated admin or local system token. so this is not privilege escalation - we already have all at begin. this is only show that no sense check caller process name
 
 run [demo.bat](https://github.com/rbmm/ShadowAdmin/blob/main/x64/Release/demo.bat) for test
 
-the complete trace of [SspiExLogonSystemManagedAdmin](https://github.com/rbmm/TVI/blob/main/DEMO/SspirLogonSystemManagedAdmin.tvi)
-it can be looked with [tvi.exe](https://github.com/rbmm/TVI/blob/main/X64/tvi.exe) tool
 
-![LsapCanLogonShadowAdmin](pa3.png)
+## How Do Users Get a Shadow Account Token?
 
-## Legacy Shadow Admin implementation ( 26100.1742 )
+consent.exe simply call
+
+```
+ULONG CuipGetElevatedToken(_Inout_ PHANDLE phToken);
+	NtQueryInformationToken(*phToken, TokenLinkedToken, phToken, )
+		SepLogonSystemManagedAdmin					; in kernel
+			KsecLogonSystemManagedAdmin				; in kernel
+				SspirLogonSystemManagedAdmin		; in lsass
+					LogonUserExExW					; in lsass
+```
+
+![stack](pa7.png)
+
+
+## Legacy Shadow Admin implementation ( looked in 26100.1742 version )
 
 look implementation of basic consent.exe functions in [LegacyShadowAdminAccount.cpp](LegacyShadowAdminAccount.cpp)
 
-`CuiGetTokenForApp` is called. inside it called `GetCredentials` ( it use `CredUIPromptForWindowsCredentialsW` ) and then `AttemptLogon` -> `AttemptCredProvLogon` (used data returned by `CredUIPromptForWindowsCredentialsW` )
+(*I intentionally changed the code a little because some things were unbearable to look at*)
+
+`CuiGetTokenForApp` is called. inside it called `GetCredentials` ( it use `CredUIPromptForWindowsCredentialsW` ) and then 
+`AttemptLogon` -> `AttemptCredProvLogon` (used data returned by `CredUIPromptForWindowsCredentialsW` )
 of course, if user not admin or UAC set for ask admin for credentials too otherwise simply existing admin token is used and `CredUIPromptForWindowsCredentialsW` show only Yes/No dialog 
 
 then, if settings set to use ShadowAdmin, function `CuipCreateAutomaticAdminAccount` is called
@@ -210,8 +330,8 @@ then, if settings set to use ShadowAdmin, function `CuipCreateAutomaticAdminAcco
 but this function always fail ! how it work ?
 first it get user name from token, via `ImpersonateLoggedOnUser/GetUserNameExW(NameSamCompatible)/RevertToSelf`
 
-than `CuipGetShadowAdminAccountSuffix` is called. it add `_????????` ( _ and 8 random chars from `"abcdefghijklmnopqrstuvwxyz0123456789"` set ) suffix to name.
-which chars is add depend from user Sid sha256 hash
+than `CuipGetShadowAdminAccountSuffix` is called. it _ and 8 random chars from `"abcdefghijklmnopqrstuvwxyz0123456789"` set to name.
+which chars is add depend from user Sid (used sha256 hash of Sid padded with 0 to SECURITY_MAX_SID_SIZE )
 
 say for examply user name is `Kelly` and shadow admin name can be `Kelly_atunm63m`
 
@@ -219,7 +339,7 @@ than was check via `NetUserGetInfo`, are such user exist. if not - `NetUserAdd` 
 `USER_INFO_4` is used and problem in `usri4_flags`. consent set it to
 
 ```
-UF_DONT_EXPIRE_PASSWD|UF_SHADOW_ADMIN_ACCOUNT|UF_PASSWD_CANT_CHANGE|UF_PASSWD_NOTREQD|UF_SCRIPT;
+ui.usri4_flags = UF_DONT_EXPIRE_PASSWD|UF_SHADOW_ADMIN_ACCOUNT|UF_PASSWD_CANT_CHANGE|UF_PASSWD_NOTREQD|UF_SCRIPT;
 ```
 
 where 
@@ -230,29 +350,32 @@ where
 
 ![UF_SHADOW_ADMIN_ACCOUNT](pa1.png)
 
-is undocumented flag. but NetUserAdd dont recognize it ))
+is undocumented flag. but NetUserAdd (from 26100.1742) dont recognize it ))
 
 ![UF_SHADOW_ADMIN_ACCOUNT](pa2.png)
 
-so api fail with `ERROR_INVALID_PARAMETER` (and `if (parm_err) *parm_err = 8;` despite usri4_flags is 7 , not 8 )
+so api fail with `ERROR_INVALID_PARAMETER` (and `if (parm_err) *parm_err = 8;` despite `usri4_flags` is 7 index, not 8 )
 
-but in new versions of SAMCLI.DLL ( where `NetUserAdd` is implemented ) this is fixed:
-
-![UF_SHADOW_ADMIN_ACCOUNT](4000.png)
-
-if `Feature_ShadowAdmin__private_IsEnabledDeviceUsageNoInline` flag `UF_SHADOW_ADMIN_ACCOUNT` (0x4000) became valid
-
-but let we fix (under debugger) `UF_SHADOW_ADMIN_ACCOUNT` flag. account will be created. but this is not all.
+but let we fix (under debugger) `UF_SHADOW_ADMIN_ACCOUNT` flag. account will be created.
 
 `CuipHideShadowAdminFromLogonUi` set `UserDontShowInLogonUI` property on account and 
 `NetLocalGroupAddMembers` add it to `"Administrators"`
 the `"Administrators"` is **hardcoded** ! so this api call fail on not EN windows, where `S-1-5-32-544` alias have another name. 
 yet one error. (i write correct implementation - [`SamLocalGroupAddMembers`](https://github.com/rbmm/ShadowAdmin/blob/main/LegacyShadowAdminAccount.cpp#L5))
-`LogonUserExExW` then is called (it ok). but then..
-`CreateShadowAdminLink` is called. it use strange `(TOKEN_INFORMATION_CLASS)-2` value. and got error `STATUS_NOT_IMPLEMENTED`
+
+`LogonUserExExW` then is called (it ok). but then...
+`CreateShadowAdminLink` is called. it use strange new 
+
+```
+#define TokenShadowAdminLink ((TOKEN_INFORMATION_CLASS)-2)
+```
+
+and got error `STATUS_NOT_IMPLEMENTED`
 interesting that kernel implementation of `NtSetInformationToken` first check `TOKEN_INFORMATION_CLASS` as unsigned and reject `-2` as too big.
-and return `STATUS_NOT_IMPLEMENTED`. but if skip this check, then value for `-2` is checked (despite this code is unreachable). and in this case,
-`SepOneWayLinkLogonSessions` api is called. but it have very simply implementation - 
+and return `STATUS_NOT_IMPLEMENTED`. 
+but if skip this check, then value for `-2` is checked (despite this code is unreachable). and in this case,
+`SepOneWayLinkLogonSessions` api is called. but it have very simply implementation 
+ 
 ```
 NTSTATUS SepOneWayLinkLogonSessions()
 {
@@ -262,16 +385,31 @@ NTSTATUS SepOneWayLinkLogonSessions()
 
 ![FFFFFFFE](-2.png)
 
-so at first `NetUserAdd` dont work with `UF_SHADOW_ADMIN_ACCOUNT`, then `NtSetInformationToken` wrong check for `-2`, and finally, 
+so at first `NetUserAdd` dont work with `UF_SHADOW_ADMIN_ACCOUNT`, then `NtSetInformationToken` wrong check for `TokenShadowAdminLink`, and finally, 
 even if check was correct, `SepOneWayLinkLogonSessions` anyway return `STATUS_NOT_SUPPORTED`
 
 so `CreateShadowAdminLink` always fail too. so i be say, that in version 26100.1742 this never work, despite some code exist
 
 ## Current Shadow Admin implementation ( 27858.1000 )
 
-now
-#define TokenShadowAdminLink ((TOKEN_INFORMATION_CLASS)-2)
-is fixed in kernel. exist next check:
+look implementation of basic consent.exe functions in [ShadowAdminAccount.cpp](ShadowAdminAccount.cpp)
+
+in new versions of SAMCLI.DLL ( where `NetUserAdd` is implemented ) problem with `UF_SHADOW_ADMIN_ACCOUNT` is fixed:
+
+![UF_SHADOW_ADMIN_ACCOUNT](4000.png)
+
+if `Feature_ShadowAdmin__private_IsEnabledDeviceUsageNoInline` flag `UF_SHADOW_ADMIN_ACCOUNT` (0x4000) became valid
+
+it mapped to 
+
+```
+#define USER_SHADOW_ADMIN_ACCOUNT (0x00400000)
+```
+
+this is used for `USER_CONTROL_INFORMATION::UserAccountControl` (look for `SamQueryInformationUser / SamSetInformationUser` )
+
+
+the support for `TokenShadowAdminLink` also fixed in kernel. exist next check:
 
 ```
 RTL_ELEVATION_FLAGS Flags;
@@ -281,10 +419,10 @@ if (Feature_ShadowAdmin__private_IsEnabledDeviceUsageNoInline() &&
     TokenShadowAdminLink == TokenInformationClass) { ...}
 ```
 
-and implementation of SepOneWayLinkLogonSessions not empty now:
+and implementation of `SepOneWayLinkLogonSessions` not empty now:
 
 ```
-NTSTATUS SepOneWayLinkLogonSessions(PACCESS_TOKEN Token, HANDLE hTokenToLink, KPROCESSOR_MODE AccessMode)
+NTSTATUS SepOneWayLinkLogonSessions(PTOKEN Token, HANDLE hTokenToLink, KPROCESSOR_MODE AccessMode)
 {
 	if (!Feature_ShadowAdmin__private_IsEnabledDeviceUsageNoInline())
 	{
@@ -307,7 +445,14 @@ NTSTATUS SepOneWayLinkLogonSessions(PACCESS_TOKEN Token, HANDLE hTokenToLink, KP
 	
 	if (0 <= status)
 	{
-		...
+		if (Token->IntegrityLevelIndex != 1 || TokenToLink->IntegrityLevelIndex != 1)
+		{
+			status = STATUS_INVALID_PARAMETER;
+		}
+		else
+		{
+			...
+		}
 		ObfDereferenceObject(TokenToLink);
 	}
 	
@@ -315,4 +460,14 @@ NTSTATUS SepOneWayLinkLogonSessions(PACCESS_TOKEN Token, HANDLE hTokenToLink, KP
 }
 ```
 
-so `CreateShadowAdminLink` is work ok ( require `SeCreateTokenPrivilege` (if `Feature_AdminlessElevatedToken`) or `SeTcbPrivilege` enabled  )
+but the `IntegrityLevelIndex` points to the last entry in the UserAndGroups array (index start from 1, not from 0)
+so condition `Token->IntegrityLevelIndex != 1` mean that token have only single Mandatory Label in groups, or api return `STATUS_INVALID_PARAMETER`
+
+so `CreateShadowAdminLink` still fail anyway, but now with code `STATUS_INVALID_PARAMETER` ( if we have `SeCreateTokenPrivilege` (if `Feature_AdminlessElevatedToken`) or `SeTcbPrivilege` enabled  )
+
+in new `CuipCreateAutomaticAdminAccount` added `CuipRemoveLegacyShadowAdminAccount(hToken)` call.
+it check are user exist by `NetUserGetInfo` and then check are `usri4_flags` have `UF_SHADOW_ADMIN_ACCOUNT`. if yes - call `NetUserDel`
+but `CreateShadowAdminLink` must fail anyway, because `IntegrityLevelIndex != 1`
+
+but because `__WilFeatureTraits_Feature_AdminlessElevatedToken` usually true, consent simply call `ZwDuplicateObject` after `CuipRemoveLegacyShadowAdminAccount(hToken)` and exit
+

@@ -114,6 +114,46 @@ NTSTATUS CreateShadowAdminLink(_In_ HANDLE hAdminToken, _In_ HANDLE hUserHandle)
 
 BOOLEAN __WilFeatureTraits_Feature_AdminlessElevatedToken;
 
+void CuipRemoveLegacyShadowAdminAccount(HANDLE hToken)
+{
+	if (ImpersonateLoggedOnUser(hToken))
+	{
+		WCHAR AccountName[0x100+10], *username;
+		ULONG cch = _countof(AccountName);
+		BOOL fOk = GetUserNameExW(NameSamCompatible, AccountName, &cch);
+		RevertToSelf();
+		if (fOk)
+		{
+			union {
+				ULONG dwError;
+				NTSTATUS status;
+			};
+
+			if (NOERROR == (dwError = CuipGetShadowAdminAccountSuffix(AccountName, AccountName + cch)))
+			{
+				if (username = wcsrchr(AccountName, '\\'))
+				{
+					username++;
+				}
+				else
+				{
+					username = AccountName;
+				}
+
+				PUSER_INFO_4 pui = 0;
+				if (NOERROR == (dwError = NetUserGetInfo(0, username, 4, (BYTE**)&pui)))
+				{
+					if (UF_SHADOW_ADMIN_ACCOUNT & pui->usri4_flags)
+					{
+						dwError = NetUserDel(0, username);
+					}
+					NetApiBufferFree(pui);
+				}
+			}
+		}
+	}
+}
+
 ULONG CuipCreateAutomaticAdminAccount(_In_ HANDLE hToken, _Outptr_ PHANDLE TokenHandle)
 {
 	CuipRemoveLegacyShadowAdminAccount(hToken);
