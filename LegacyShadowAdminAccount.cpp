@@ -147,6 +147,8 @@ ULONG AddUser(_In_ PCWSTR username)
 	return NetUserAdd(0, 4, (BYTE*)&ui, 0);
 }
 
+#define TokenShadowAdminLink ((TOKEN_INFORMATION_CLASS)-2)
+
 NTSTATUS CreateShadowAdminLink(_In_ HANDLE hAdminToken, _In_ HANDLE hUserHandle)
 {
 	ULONG cb;
@@ -155,7 +157,7 @@ NTSTATUS CreateShadowAdminLink(_In_ HANDLE hAdminToken, _In_ HANDLE hUserHandle)
 
 	if (0 <= status)
 	{
-		status = NtSetInformationToken(hLinkedToken, (TOKEN_INFORMATION_CLASS)-2, &hUserHandle, sizeof(hUserHandle));
+		status = NtSetInformationToken(hLinkedToken, TokenShadowAdminLink, &hUserHandle, sizeof(hUserHandle));
 		NtClose(hLinkedToken);
 	}
 
@@ -206,6 +208,8 @@ ULONG CuipCreateAutomaticAdminAccount(_In_ HANDLE hToken, _Outptr_ PHANDLE Token
 						// SamLookupNamesInDomain
 						// SamOpenAlias
 						// SamAddMemberToAlias
+
+						// !! L"Administrators" !! hardcoded !!
 						switch (dwError = NetLocalGroupAddMembers(0, L"Administrators", 0, (PBYTE)&mi, 1))
 						{
 						case NOERROR:

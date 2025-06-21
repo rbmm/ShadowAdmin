@@ -95,6 +95,8 @@ ULONG CuipGetShadowAdminAccountSuffix(_In_ PCWSTR lpAccountName, _Out_writes_(10
 // ?!?
 #define UF_SHADOW_ADMIN_ACCOUNT         0x4000
 
+#define TokenShadowAdminLink ((TOKEN_INFORMATION_CLASS)-2)
+
 NTSTATUS CreateShadowAdminLink(_In_ HANDLE hAdminToken, _In_ HANDLE hUserHandle)
 {
 	ULONG cb;
@@ -103,7 +105,7 @@ NTSTATUS CreateShadowAdminLink(_In_ HANDLE hAdminToken, _In_ HANDLE hUserHandle)
 
 	if (0 <= status)
 	{
-		status = NtSetInformationToken(hLinkedToken, (TOKEN_INFORMATION_CLASS)-2, &hUserHandle, sizeof(hUserHandle));
+		status = NtSetInformationToken(hLinkedToken, TokenShadowAdminLink, &hUserHandle, sizeof(hUserHandle));
 		NtClose(hLinkedToken);
 	}
 

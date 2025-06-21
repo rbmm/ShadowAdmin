@@ -223,6 +223,7 @@ if `Feature_ShadowAdmin__private_IsEnabledDeviceUsageNoInline` flag `UF_SHADOW_A
 but let we fix (under debugger) `UF_SHADOW_ADMIN_ACCOUNT` flag. account will be created. but this is not all.
 
 `CuipHideShadowAdminFromLogonUi` set `UserDontShowInLogonUI` property on account and `NetLocalGroupAddMembers` add it to `"Administrators"`
+the `"Administrators"` is **hardcoded** ! so this api call fail on not EN windows, where `S-1-5-32-544` alias have another name. yet one error.
 `LogonUserExExW` then is called (it ok). but then..
 `CreateShadowAdminLink` is called. it use strange `(TOKEN_INFORMATION_CLASS)-2` value. and got error `STATUS_NOT_IMPLEMENTED`
 interesting that kernel implementation of `NtSetInformationToken` first check `TOKEN_INFORMATION_CLASS` as unsigned and reject `-2` as too big.
@@ -243,3 +244,51 @@ even if check was correct, `SepOneWayLinkLogonSessions` anyway return `STATUS_NO
 so `CreateShadowAdminLink` always fail too. so i be say, that in version 26100.1742 this never work, despite some code exist
 
 ## Current Shadow Admin implementation ( 27858.1000 )
+
+now
+#define TokenShadowAdminLink ((TOKEN_INFORMATION_CLASS)-2)
+is fixed in kernel. exist next check:
+
+```
+RTL_ELEVATION_FLAGS Flags;
+if (Feature_ShadowAdmin__private_IsEnabledDeviceUsageNoInline() && 
+    0 <= RtlQueryElevationFlags(&Flags) &&
+    0x10 == (0x18 & Flags) &&
+    TokenShadowAdminLink == TokenInformationClass) { ...}
+```
+
+and implementation of SepOneWayLinkLogonSessions not empty now:
+
+```
+NTSTATUS SepOneWayLinkLogonSessions(PACCESS_TOKEN Token, HANDLE hTokenToLink, KPROCESSOR_MODE AccessMode)
+{
+	if (!Feature_ShadowAdmin__private_IsEnabledDeviceUsageNoInline())
+	{
+		return STATUS_NOT_IMPLEMENTED;
+	}
+	
+	if (Feature_AdminlessElevatedToken__private_IsEnabledDeviceUsageNoInline())
+	{
+		// checked for SeCreateTokenPrivilege
+		return SepOneWayLinkLogonSessions(Token, hTokenToLink, AccessMode);
+	}
+	
+	if (!SeSinglePrivilegeCheck(&SeTcbPrivilege, AccessMode))
+	{
+		return STATUS_PRIVILEGE_NOT_HELD;
+	}
+	
+	PACCESS_TOKEN TokenToLink;
+	NTSTATUS status = ObReferenceObjectByHandle(hTokenToLink, TOKEN_QUERY, *SeTokenObjectType, AccessMode, &TokenToLink, 0);
+	
+	if (0 <= status)
+	{
+		...
+		ObfDereferenceObject(TokenToLink);
+	}
+	
+	return status;
+}
+```
+
+so `CreateShadowAdminLink` is work ok ( require `SeCreateTokenPrivilege` (if `Feature_AdminlessElevatedToken`) or `SeTcbPrivilege` enabled  )
