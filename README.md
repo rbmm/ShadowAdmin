@@ -214,6 +214,12 @@ is undocumented flag. but NetUserAdd dont recognize it ))
 
 so api fail with `ERROR_INVALID_PARAMETER` (and `if (parm_err) *parm_err = 8;` despite usri4_flags is 7 , not 8 )
 
+but in new versions of SAMCLI.DLL ( where NetUserAdd is implemented ) this is fixed:
+
+![UF_SHADOW_ADMIN_ACCOUNT](4000.png)
+
+if `Feature_ShadowAdmin__private_IsEnabledDeviceUsageNoInline` flag `UF_SHADOW_ADMIN_ACCOUNT` (0x4000) became valid
+
 but let we fix (under debugger) `UF_SHADOW_ADMIN_ACCOUNT` flag. account will be created. but this is not all.
 
 `CuipHideShadowAdminFromLogonUi` set `UserDontShowInLogonUI` property on account and `NetLocalGroupAddMembers` add it to `"Administrators"`
