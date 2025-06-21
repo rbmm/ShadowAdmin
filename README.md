@@ -178,52 +178,59 @@ it can be looked with [tvi.exe](https://github.com/rbmm/TVI/blob/main/X64/tvi.ex
 
 ## Legacy Shadow Admin implementation ( 26100.1742 )
 
-look implementation of basic consent.exe functions in [LegacyShadowAdminAccount.cpp](https://github.com/rbmm/ShadowAdmin/blob/main/LegacyShadowAdminAccount.cpp)
-CuiGetTokenForApp is called. inside it called GetCredentials ( it use CredUIPromptForWindowsCredentialsW ) and then AttemptLogon -> AttemptCredProvLogon (used data returned by CredUIPromptForWindowsCredentialsW )
-of course, if user not admin or UAC set for ask admin for credentials too otherwise simply existing admin token is used and CredUIPromptForWindowsCredentialsW show only Yes/No dialog 
+look implementation of basic consent.exe functions in [LegacyShadowAdminAccount.cpp](LegacyShadowAdminAccount.cpp)
 
-then, if settings set to use ShadowAdmin, function CuipCreateAutomaticAdminAccount is called
+`CuiGetTokenForApp` is called. inside it called `GetCredentials` ( it use `CredUIPromptForWindowsCredentialsW` ) and then `AttemptLogon` -> `AttemptCredProvLogon` (used data returned by `CredUIPromptForWindowsCredentialsW` )
+of course, if user not admin or UAC set for ask admin for credentials too otherwise simply existing admin token is used and `CredUIPromptForWindowsCredentialsW` show only Yes/No dialog 
+
+then, if settings set to use ShadowAdmin, function `CuipCreateAutomaticAdminAccount` is called
 
 but this function always fail ! how it work ?
-first it get user name from token, via ImpersonateLoggedOnUser/GetUserNameExW(NameSamCompatible)/RevertToSelf
+first it get user name from token, via `ImpersonateLoggedOnUser/GetUserNameExW(NameSamCompatible)/RevertToSelf`
 
-than CuipGetShadowAdminAccountSuffix is called. it add _???????? ( _ and 8 random chars from "abcdefghijklmnopqrstuvwxyz0123456789" set ) suffix to name.
+than `CuipGetShadowAdminAccountSuffix` is called. it add `_????????` ( _ and 8 random chars from `"abcdefghijklmnopqrstuvwxyz0123456789"` set ) suffix to name.
 which chars is add depend from user Sid sha256 hash
 
-say for examply user name is Kelly and shadow admin name can be Kelly_atunm63m
+say for examply user name is `Kelly` and shadow admin name can be `Kelly_atunm63m`
 
-than was check via NetUserGetInfo, are such user exist. if not - NetUserAdd is called, for create new user. and this call always fail.
-USER_INFO_4 is used and problem in usri4_flags. consent set it to 
+than was check via `NetUserGetInfo`, are such user exist. if not - `NetUserAdd` is called, for create new user. and this call always fail.
+`USER_INFO_4` is used and problem in `usri4_flags`. consent set it to
 
+```
 UF_DONT_EXPIRE_PASSWD|UF_SHADOW_ADMIN_ACCOUNT|UF_PASSWD_CANT_CHANGE|UF_PASSWD_NOTREQD|UF_SCRIPT;
+```
 
 where 
 
+```
 #define UF_SHADOW_ADMIN_ACCOUNT         0x4000
+```
 
 ![UF_SHADOW_ADMIN_ACCOUNT](pa1.png)
 
 is undocumented flag. but NetUserAdd dont recognize it ))
 
-so api fail with error_invalid_parameter
+![UF_SHADOW_ADMIN_ACCOUNT](pa2.png)
 
-but let we fix (under debugger) UF_SHADOW_ADMIN_ACCOUNT flag. account will be created. but this is not all.
+so api fail with ERROR_INVALID_PARAMETER (and `if (parm_err) *parm_err = 8;` despite usri4_flags is 7 , not 8 )
 
-CuipHideShadowAdminFromLogonUi set UserDontShowInLogonUI property on account and NetLocalGroupAddMembers add it to "Administrators"
-LogonUserExExW then is called (it ok). but then..
-CreateShadowAdminLink is called. it use strange (TOKEN_INFORMATION_CLASS)-2 value. and got error STATUS_NOT_IMPLEMENTED
-interesting that kernel implementation of NtSetInformationToken first check TOKEN_INFORMATION_CLASS as unsigned and reject -2 as too big.
-and return STATUS_NOT_IMPLEMENTED. but if skip this check, then value for -2 is checked (despite this code is unreachable). and in this case,
-SepOneWayLinkLogonSessions api is called. but it have very simply implementation - 
+but let we fix (under debugger) `UF_SHADOW_ADMIN_ACCOUNT` flag. account will be created. but this is not all.
 
+`CuipHideShadowAdminFromLogonUi` set `UserDontShowInLogonUI` property on account and `NetLocalGroupAddMembers` add it to `"Administrators"`
+`LogonUserExExW` then is called (it ok). but then..
+`CreateShadowAdminLink` is called. it use strange `(TOKEN_INFORMATION_CLASS)-2` value. and got error `STATUS_NOT_IMPLEMENTED`
+interesting that kernel implementation of `NtSetInformationToken` first check `TOKEN_INFORMATION_CLASS` as unsigned and reject `-2` as too big.
+and return `STATUS_NOT_IMPLEMENTED`. but if skip this check, then value for `-2` is checked (despite this code is unreachable). and in this case,
+`SepOneWayLinkLogonSessions` api is called. but it have very simply implementation - 
+```
 NTSTATUS SepOneWayLinkLogonSessions(..)
 {
     return STATUS_NOT_SUPPORTED;
 } 
+```
+so at first `NetUserAdd` dont work with `UF_SHADOW_ADMIN_ACCOUNT`, then `NtSetInformationToken` wrong check for `-2`, and finally, 
+even if check was correct, `SepOneWayLinkLogonSessions` anyway return `STATUS_NOT_SUPPORTED`
 
-so at first NetUserAdd dont work with UF_SHADOW_ADMIN_ACCOUNT, then NtSetInformationToken wrong check for -2, and finally, 
-even if check was correct, SepOneWayLinkLogonSessions anyway return STATUS_NOT_SUPPORTED
-
-so CreateShadowAdminLink always fail too. so i be say, that in version 26100.1742 this never work, despite some code exist
+so `CreateShadowAdminLink` always fail too. so i be say, that in version 26100.1742 this never work, despite some code exist
 
 ## Current Shadow Admin implementation ( 27858.1000 )
