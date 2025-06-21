@@ -214,7 +214,7 @@ is undocumented flag. but NetUserAdd dont recognize it ))
 
 so api fail with `ERROR_INVALID_PARAMETER` (and `if (parm_err) *parm_err = 8;` despite usri4_flags is 7 , not 8 )
 
-but in new versions of SAMCLI.DLL ( where NetUserAdd is implemented ) this is fixed:
+but in new versions of SAMCLI.DLL ( where `NetUserAdd` is implemented ) this is fixed:
 
 ![UF_SHADOW_ADMIN_ACCOUNT](4000.png)
 
