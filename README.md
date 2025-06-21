@@ -463,7 +463,8 @@ NTSTATUS SepOneWayLinkLogonSessions(PTOKEN Token, HANDLE hTokenToLink, KPROCESSO
 but the `IntegrityLevelIndex` points to the last entry in the UserAndGroups array (index start from 1, not from 0)
 so condition `Token->IntegrityLevelIndex != 1` mean that token have only single Mandatory Label in groups, or api return `STATUS_INVALID_PARAMETER`
 
-so `CreateShadowAdminLink` still fail anyway, but now with code `STATUS_INVALID_PARAMETER` ( if we have `SeCreateTokenPrivilege` (if `Feature_AdminlessElevatedToken`) or `SeTcbPrivilege` enabled  )
+so `CreateShadowAdminLink` still can fail anyway, but now with code `STATUS_INVALID_PARAMETER` ( if we have `SeCreateTokenPrivilege` (if `Feature_AdminlessElevatedToken`) or `SeTcbPrivilege` enabled  )
+but really it fail with code `STATUS_NO_SUCH_LOGON_SESSION` because tooken created for shadow admin have no linked token..
 
 in new `CuipCreateAutomaticAdminAccount` added `CuipRemoveLegacyShadowAdminAccount(hToken)` call.
 it check are user exist by `NetUserGetInfo` and then check are `usri4_flags` have `UF_SHADOW_ADMIN_ACCOUNT`. if yes - call `NetUserDel`
