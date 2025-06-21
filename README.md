@@ -173,3 +173,5 @@ run [demo.bat](https://github.com/rbmm/ShadowAdmin/blob/main/x64/Release/demo.ba
 
 the complete trace of [SspiExLogonSystemManagedAdmin](https://github.com/rbmm/TVI/blob/main/DEMO/SspirLogonSystemManagedAdmin.tvi)
 it can be looked with [tvi.exe](https://github.com/rbmm/TVI/blob/main/X64/tvi.exe) tool
+
+![LsapCanLogonShadowAdmin](pa3.png)
