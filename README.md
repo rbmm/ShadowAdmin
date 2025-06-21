@@ -212,7 +212,7 @@ is undocumented flag. but NetUserAdd dont recognize it ))
 
 ![UF_SHADOW_ADMIN_ACCOUNT](pa2.png)
 
-so api fail with ERROR_INVALID_PARAMETER (and `if (parm_err) *parm_err = 8;` despite usri4_flags is 7 , not 8 )
+so api fail with `ERROR_INVALID_PARAMETER` (and `if (parm_err) *parm_err = 8;` despite usri4_flags is 7 , not 8 )
 
 but let we fix (under debugger) `UF_SHADOW_ADMIN_ACCOUNT` flag. account will be created. but this is not all.
 
@@ -223,11 +223,14 @@ interesting that kernel implementation of `NtSetInformationToken` first check `T
 and return `STATUS_NOT_IMPLEMENTED`. but if skip this check, then value for `-2` is checked (despite this code is unreachable). and in this case,
 `SepOneWayLinkLogonSessions` api is called. but it have very simply implementation - 
 ```
-NTSTATUS SepOneWayLinkLogonSessions(..)
+NTSTATUS SepOneWayLinkLogonSessions()
 {
     return STATUS_NOT_SUPPORTED;
 } 
 ```
+
+![FFFFFFFE](-2.png)
+
 so at first `NetUserAdd` dont work with `UF_SHADOW_ADMIN_ACCOUNT`, then `NtSetInformationToken` wrong check for `-2`, and finally, 
 even if check was correct, `SepOneWayLinkLogonSessions` anyway return `STATUS_NOT_SUPPORTED`
 
