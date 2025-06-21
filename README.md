@@ -471,3 +471,5 @@ but `CreateShadowAdminLink` must fail anyway, because `IntegrityLevelIndex != 1`
 
 but because `__WilFeatureTraits_Feature_AdminlessElevatedToken` usually true, consent simply call `ZwDuplicateObject` after `CuipRemoveLegacyShadowAdminAccount(hToken)` and exit
 
+new shadow admin name is ADMIN_ prefix before user name, when legacy add _ and 8 random chars suffix. something `ADMIN_rbmm` vs `rbmm_1d5hea0w`
+
