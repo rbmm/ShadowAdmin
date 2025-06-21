@@ -201,7 +201,7 @@ where
 
 #define UF_SHADOW_ADMIN_ACCOUNT         0x4000
 
-![UF_SHADOW_ADMIN_ACCOUNT](pa3.png)
+![UF_SHADOW_ADMIN_ACCOUNT](pa1.png)
 
 is undocumented flag. but NetUserAdd dont recognize it ))
 
