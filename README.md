@@ -258,7 +258,8 @@ and `LogonUserExExW` create token for this shadow admin, which returned as `Toke
 the complete trace of [SspiExLogonSystemManagedAdmin](https://github.com/rbmm/TVI/blob/main/DEMO/SspirLogonSystemManagedAdmin.tvi)
 it can be looked with [tvi.exe](https://github.com/rbmm/TVI/blob/main/X64/tvi.exe) tool
 
-![LsapCanLogonShadowAdmin](pa3.png)
+![SspirLogonSystemManagedAdmin](pa3.png)
+![CreateShadowAdminAccount](pa4.png)
 
 let now look for `LogonUserExExW` in more details. after `LsapCallAuthPackageForLogon` success, new code is added
 
